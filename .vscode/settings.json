@@ -67,5 +67,5 @@
         "*.sln": "*.csproj",
         "*.slnx": "*.csproj"
     },
-    "dotnet.defaultSolution": "PA 1 actualizado.slnx"
+    "dotnet.defaultSolution": "PA-2-Desarrollo-de-videojuegos.slnx"
 }

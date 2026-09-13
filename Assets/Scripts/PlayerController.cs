@@ -2,90 +2,128 @@ using UnityEngine;
 using TMPro;
 using UnityEngine.SceneManagement;
 
-/// =========================================================================================
-/// PROYECTO: Hito 1 - Prototipo Funcional 2D y Game Feel ("El Laboratorio de Movimiento")
-/// SCRIPT: PlayerController.cs
-/// DESCRIPCIÓN: Controlador integral del personaje jugador en 2D.
-/// Gestiona:
-///   1. Movimiento horizontal responsivo sin inercia artificial (GetAxisRaw).
-///   2. Sistema de salto condicional a contacto con suelo (prevención de salto infinito).
-///   3. Detección física de suelo mediante OverlapCircle y capas (LayerMask).
-///   4. Sincronización de animaciones con estados físicos y velocidades.
-///   5. Sistema de colisiones e interacciones (Monedas, Pinchos, Bombas/Obstáculos con knockback).
-/// =========================================================================================
+// =========================================================================================
+// ESTE SCRIPT HACE ESTO:
+// Controlador principal del jugador en 2D ("PlayerController").
+// Se encarga del movimiento horizontal, salto, detección de suelo, animaciones,
+// recolección de monedas, colisión con trampas/obstáculos y efectos de sonido.
+// 
+// ★★★ RESUMEN: LOS 5 BLOQUES MÁS IMPORTANTES DE ESTE ARCHIVO ★★★
+// 1. [IMPORTANTE] Detección física de suelo con OverlapCircle en FixedUpdate (evita salto infinito).
+// 2. [IMPORTANTE] Sistema de salto condicionado a isGrounded en Update (salto controlado).
+// 3. [IMPORTANTE] Movimiento horizontal responsivo con GetAxisRaw en Update (control preciso).
+// 4. [IMPORTANTE] Sistema de colisiones en OnTriggerEnter2D (monedas, muerte por pinchos y knockback).
+// 5. [IMPORTANTE] Giro del sprite con Mathf.Sign en Update (voltea izquierda/derecha).
+// =========================================================================================
+[RequireComponent(typeof(AudioSource))]
 public class PlayerController : MonoBehaviour
 {
     // =========================================================================================
-    // BLOQUE 1: VARIABLES SERIALIZADAS CONFIGURABLES EN EL INSPECTOR DE UNITY
+    // ESTE BLOQUE HACE ESTO: Variables configurables desde el Inspector de Unity
+    // Aquí defines valores como la velocidad, fuerza de salto, capas y sonidos sin tocar el código.
     // =========================================================================================
 
-    [Header("--- PARÁMETROS DE MOVIMIENTO Y GAME FEEL ---")]
-    [Tooltip("Velocidad de desplazamiento horizontal en unidades de Unity por segundo")]
+    [Header("--- PARÁMETROS DE MOVIMIENTO Y SALTO ---")]
+    // [IMPORTANTE] Este valor define la velocidad horizontal a la que camina el personaje
+    [Tooltip("Velocidad de desplazamiento horizontal en unidades por segundo")]
     [SerializeField] private float speed = 2f;
 
-    [Tooltip("Fuerza del impulso vertical que se aplica al Rigidbody2D al saltar")]
-    [SerializeField] private float jumpForce = 4f;
+    // [IMPORTANTE] Este valor define con cuánta fuerza salta el personaje hacia arriba
+    [Tooltip("Fuerza del impulso vertical que se aplica al saltar")]
+    [SerializeField] private float jumpForce = 2f;
+
 
     [Header("--- DETECCIÓN FÍSICA DE SUELO ---")]
-    [Tooltip("Objeto Transform vacío ubicado en la base/pies del personaje")]
+    // [IMPORTANTE] Este objeto vacío se coloca en los pies del personaje para saber desde dónde medir el suelo
+    [Tooltip("Objeto Transform vacío ubicado en los pies del personaje")]
     [SerializeField] private Transform groundCheck;
 
-    [Tooltip("Radio del círculo imaginario de detección para comprobar si pisa el suelo")]
+    // [IMPORTANTE] Radio del círculo invisible para comprobar si tocamos el suelo
+    [Tooltip("Radio del círculo de detección para comprobar si pisa el suelo")]
     [SerializeField] private float groundRadius = 0.1f;
 
-    [Tooltip("Máscara de capas que define qué objetos del escenario se consideran suelo caminable")]
+    // [IMPORTANTE] Esta máscara le indica al juego qué capas (Layers) se consideran suelo caminable
+    [Tooltip("Máscara de capas que define qué objetos del escenario son suelo")]
     [SerializeField] private LayerMask groundLayer;
 
+
     [Header("--- INTERFAZ DE USUARIO (UI) ---")]
-    [Tooltip("Elemento de texto en pantalla (TextMeshPro) para mostrar la cantidad de monedas recolectadas")]
+    // Este elemento de texto muestra en pantalla la cantidad de monedas recolectadas
+    [Tooltip("Elemento de texto (TextMeshPro) para mostrar las monedas en pantalla")]
     [SerializeField] private TMP_Text TextCoins;
 
 
-    // =========================================================================================
-    // BLOQUE 2: REFERENCIAS A COMPONENTES INTERNOS Y VARIABLES DE CONTROL PRIVADAS
-    // =========================================================================================
+    [Header("--- EFECTOS DE SONIDO (AUDIO) ---")]
+    // Este clip de audio se reproduce cuando el jugador recolecta una moneda
+    [Tooltip("Sonido que se reproduce al recoger una moneda")]
+    [SerializeField] private AudioClip coinClip;
 
-    private Rigidbody2D rb2D;       // Componente del motor de física 2D que controla la velocidad y gravedad
-    private Animator animator;      // Componente que controla la máquina de estados de animaciones (Idle, Run, Jump, etc.)
-
-    private float move;             // Almacena el valor de la tecla presionada (-1: izquierda, 0: quieto, 1: derecha)
-    private bool isGrounded;        // Bandera booleana (true/false) que indica si el jugador está tocando el suelo
-    private int coins = 0;          // Contador interno de monedas recolectadas durante la partida
+    // Este clip de audio se reproduce cuando el jugador choca con un barril o bomba
+    [Tooltip("Sonido que se reproduce al chocar con un barril o bomba")]
+    [SerializeField] private AudioClip barrelClip;
 
 
     // =========================================================================================
-    // BLOQUE 3: MÉTODO START - INICIALIZACIÓN DE COMPONENTES
-    // Se ejecuta una sola vez al inicio cuando el objeto se activa en la escena.
+    // ESTE BLOQUE HACE ESTO: Variables privadas y componentes internos del personaje
+    // No aparecen en el Inspector. Guardan el estado interno y las referencias del script.
+    // =========================================================================================
+
+    // Componente de físicas 2D (controla la gravedad, fuerzas y velocidad)
+    private Rigidbody2D rb2D;
+
+    // Componente de animaciones (controla cuándo corre, salta o queda quieto)
+    private Animator animator;
+
+    // Componente emisor de sonido del personaje
+    private AudioSource audioSource;
+
+    // Guarda el valor de las teclas de dirección (-1: izquierda, 0: quieto, 1: derecha)
+    private float move;
+
+    // [IMPORTANTE] Guarda si el personaje está tocando el suelo (true) o en el aire (false)
+    private bool isGrounded;
+
+    // Contador interno de monedas recolectadas
+    private int coins = 0;
+
+
+    // =========================================================================================
+    // ESTE BLOQUE HACE ESTO: Método Start()
+    // Se ejecuta una sola vez al iniciar la escena.
+    // Sirve para obtener y conectar automáticamente los componentes del personaje.
     // =========================================================================================
     void Start()
     {
-        // Obtenemos y enlazamos automáticamente los componentes adjuntos al GameObject
+        // Esta línea obtiene y guarda el componente Rigidbody2D del personaje
         rb2D = GetComponent<Rigidbody2D>();
+
+        // Esta línea obtiene y guarda el componente Animator para manejar animaciones
         animator = GetComponent<Animator>();
+
+        // Esta línea obtiene y guarda el componente AudioSource para reproducir los sonidos
+        audioSource = GetComponent<AudioSource>();
     }
 
 
     // =========================================================================================
-    // BLOQUE 4: MÉTODO UPDATE - ENTRADA DE USUARIO Y LÓGICA POR FRAME
-    // Se ejecuta en cada fotograma del juego. Ideal para capturar teclas de forma instantánea.
+    // ESTE BLOQUE HACE ESTO: Método Update()
+    // Se ejecuta en cada fotograma (frame) del juego.
+    // Sirve para detectar teclas del jugador y reaccionar de inmediato.
     // =========================================================================================
     void Update()
     {
         // -------------------------------------------------------------------------------------
-        // PASO 4.1: LECTURA DEL TECLADO / INPUT HORIZONTAL
-        // Usamos GetAxisRaw para obtener valores exactos (-1, 0, 1) sin suavizado ni retardo.
+        // ★★★ [IMPORTANTE: MOVIMIENTO HORIZONTAL RESPONSIVO] ★★★
+        // Este bloque hace esto: Lee el teclado horizontal (flechas o teclas A/D)
+        // y le aplica velocidad inmediata al Rigidbody2D sin inercia resbaladiza.
         // -------------------------------------------------------------------------------------
         move = Input.GetAxisRaw("Horizontal");
-
-        // -------------------------------------------------------------------------------------
-        // PASO 4.2: APLICACIÓN DE VELOCIDAD HORIZONTAL
-        // Modificamos la velocidad horizontal (X) multiplicando por 'speed' y conservamos la vertical (Y).
-        // -------------------------------------------------------------------------------------
         rb2D.linearVelocity = new Vector2(move * speed, rb2D.linearVelocity.y);
 
         // -------------------------------------------------------------------------------------
-        // PASO 4.3: GIRO DE ORIENTACIÓN DEL SPRITE (FLIP HORIZONTAL)
-        // Si el personaje se mueve, multiplicamos la escala X por su signo (+1 derecha, -1 izquierda).
+        // ★★★ [IMPORTANTE: GIRO DE ORIENTACIÓN DEL PERSONAJE / FLIP] ★★★
+        // Este bloque hace esto: Gira visualmente el sprite según la dirección a la que camina.
+        // Cambia la escala en X: 1 mira a la derecha, -1 mira a la izquierda.
         // -------------------------------------------------------------------------------------
         if (move != 0)
         {
@@ -93,38 +131,44 @@ public class PlayerController : MonoBehaviour
         }
 
         // -------------------------------------------------------------------------------------
-        // PASO 4.4: LÓGICA DE SALTO
-        // El salto SOLO se permite si se pulsa la tecla ("Jump" / Barra espaciadora) Y 'isGrounded' es true.
-        // Esto evita saltos dobles o saltos infinitos en el aire.
+        // ★★★ [IMPORTANTE: LÓGICA DE SALTO CONDICIONADO A SUELO] ★★★
+        // Este bloque hace esto: Solo permite saltar si presionas espacio ("Jump") Y además 'isGrounded' es true.
+        // Esto evita saltar en el aire y saltos dobles no permitidos.
         // -------------------------------------------------------------------------------------
         if (Input.GetButtonDown("Jump") && isGrounded)
         {
+            // Aplica la fuerza de salto hacia arriba en el eje Y
             rb2D.linearVelocity = new Vector2(rb2D.linearVelocity.x, jumpForce);
         }
 
         // -------------------------------------------------------------------------------------
-        // PASO 4.5: ACTUALIZACIÓN DE PARÁMETROS DEL ANIMATOR
-        // Enviamos los datos físicos al Animator para cambiar entre animaciones Idle, Run, Jump y Fall.
+        // Este bloque hace esto: Actualiza las variables del Animator para reproducir animaciones
         // -------------------------------------------------------------------------------------
         if (animator != null)
         {
-            animator.SetFloat("Speed", Mathf.Abs(move));                       // Velocidad horizontal absoluta
-            animator.SetFloat("VerticalVelocity", rb2D.linearVelocity.y);      // Velocidad vertical (subiendo o cayendo)
-            animator.SetBool("IsGrounded", isGrounded);                        // ¿Está en el suelo?
+            // Envía la velocidad horizontal absoluta (0 = quieto/Idle, >0 = correr/Run)
+            animator.SetFloat("Speed", Mathf.Abs(move));
+
+            // Envía la velocidad vertical (positivo = subiendo, negativo = cayendo)
+            animator.SetFloat("VerticalVelocity", rb2D.linearVelocity.y);
+
+            // Indica si el personaje está en el suelo o en el aire
+            animator.SetBool("IsGrounded", isGrounded);
         }
     }
 
 
     // =========================================================================================
-    // BLOQUE 5: MÉTODO FIXEDUPDATE - FÍSICAS Y DETECCIÓN DE SUELO
-    // Se ejecuta a intervalos fijos de tiempo sincronizados con el motor de físicas de Unity.
+    // ESTE BLOQUE HACE ESTO: Método FixedUpdate()
+    // Se ejecuta a intervalos de tiempo fijos sincronizados con el motor de físicas de Unity.
+    // Es el lugar ideal para comprobaciones físicas como tocar el suelo.
     // =========================================================================================
     void FixedUpdate()
     {
         // -------------------------------------------------------------------------------------
-        // DETECCIÓN DE CONTACTO CON EL SUELO
-        // Creamos un círculo de colisión en la posición de 'groundCheck' con radio 'groundRadius'.
-        // Si dicho círculo choca con cualquier collider que pertenezca a 'groundLayer', retorna true.
+        // ★★★ [IMPORTANTE - EL MÁS CRÍTICO: DETECCIÓN FÍSICA DE SUELO] ★★★
+        // Este bloque hace esto: Evita el salto infinito. Comprueba si los pies del personaje tocan
+        // el suelo creando un círculo invisible en 'groundCheck' que colisiona con 'groundLayer'.
         // -------------------------------------------------------------------------------------
         if (groundCheck != null)
         {
@@ -134,19 +178,27 @@ public class PlayerController : MonoBehaviour
 
 
     // =========================================================================================
-    // BLOQUE 6: MÉTODO ONTRIGGERENTER2D - INTERACCIONES Y COLISIONES
-    // Se activa automáticamente cuando un collider Trigger entra en contacto con el jugador.
+    // ★★★ [IMPORTANTE: SISTEMA DE COLISIONES E INTERACCIONES (OnTriggerEnter2D)] ★★★
+    // ESTE BLOQUE HACE ESTO: Se activa cuando el personaje choca con un objeto "Trigger".
+    // Gestiona monedas, trampa mortal de pinchos y choque con retroceso (knockback).
     // =========================================================================================
     private void OnTriggerEnter2D(Collider2D collision)
     {
         // -------------------------------------------------------------------------------------
-        // CASO 6.1: RECOLECCIÓN DE MONEDA (Tag: "Coin")
-        // Destruye la moneda recogida, incrementa el contador y actualiza el texto de la UI.
+        // Caso A: Recolectar una moneda (objeto con etiqueta "Coin")
         // -------------------------------------------------------------------------------------
         if (collision.CompareTag("Coin"))
         {
+            // Reproduce el sonido de recolectar moneda
+            audioSource.PlayOneShot(coinClip);
+
+            // Destruye y elimina la moneda del escenario
             Destroy(collision.gameObject);
+
+            // Aumenta en 1 el contador de monedas
             coins++;
+
+            // Actualiza el texto en la interfaz (UI) con la nueva cantidad de monedas
             if (TextCoins != null)
             {
                 TextCoins.text = coins.ToString();
@@ -154,55 +206,65 @@ public class PlayerController : MonoBehaviour
         }
 
         // -------------------------------------------------------------------------------------
-        // CASO 6.2: TRAMPA MORTAL DE PINCHOS (Tag: "Spikes")
-        // Si el jugador pisa los pinchos, se reinicia la escena activa inmediatamente.
+        // Caso B: Trampa mortal de pinchos (objeto con etiqueta "Spikes")
         // -------------------------------------------------------------------------------------
         if (collision.CompareTag("Spikes"))
         {
+            // Reinicia la escena activa inmediatamente al morir
             SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
 
         // -------------------------------------------------------------------------------------
-        // CASO 6.3: OBSTÁCULO DESTRUIBLE (Tag: "Barrel" o "Bomb")
-        // Aplica retroceso (knockback) al jugador, desactiva colliders del obstáculo,
-        // activa su animación de explosión y destruye el objeto tras 0.5 segundos.
+        // Caso C: Impacto con obstáculo destruible (etiqueta "Barrel" o "Bomb")
         // -------------------------------------------------------------------------------------
         if (collision.CompareTag("Barrel") || collision.CompareTag("Bomb"))
         {
-            // 1. Calculamos la dirección del empuje alejando al jugador del obstáculo
-            Vector2 knockbackDir = (rb2D.position - (Vector2)collision.transform.position).normalized;
-            rb2D.linearVelocity = Vector2.zero;
-            rb2D.AddForce(knockbackDir * 3f, ForceMode2D.Impulse);
+            // Reproduce el sonido de rotura o explosión
+            audioSource.PlayOneShot(barrelClip);
 
-            // 2. Desactivamos las colisiones del objeto para no chocar dos veces
+            // 1. Calcula la dirección contraria para empujar al jugador lejos del obstáculo
+            Vector2 knockbackDir = (rb2D.position - (Vector2)collision.transform.position).normalized;
+
+            // Frena la velocidad previa del jugador para que el empuje sea limpio
+            rb2D.linearVelocity = Vector2.zero;
+
+            // Aplica la fuerza de empuje (knockback) tipo impulso
+            rb2D.AddForce(knockbackDir * 4f, ForceMode2D.Impulse);
+
+            // 2. Desactiva los colliders del obstáculo para no golpearlo dos veces
             BoxCollider2D[] colliders = collision.gameObject.GetComponents<BoxCollider2D>();
             foreach (BoxCollider2D col in colliders)
             {
                 col.enabled = false;
             }
 
-            // 3. Activamos el Animator del obstáculo para reproducir la animación de explosión
+            // 3. Activa la animación de explosión en el objeto obstáculo (si tiene Animator)
             if (collision.TryGetComponent(out Animator obstacleAnim))
             {
                 obstacleAnim.enabled = true;
             }
 
-            // 4. Destruimos el GameObject del obstáculo tras medio segundo
+            // 4. Destruye el objeto obstáculo después de 0.5 segundos (para que se vea la animación)
             Destroy(collision.gameObject, 0.5f);
         }
     }
 
 
     // =========================================================================================
-    // BLOQUE 7: MÉTODO ONDRAWGIZMOSSELECTED - DEPURACIÓN VISUAL EN EL EDITOR DE UNITY
-    // Dibuja guías visuales en la ventana de 'Scene' para facilitar el ajuste del radio de suelo.
+    // ESTE BLOQUE HACE ESTO: Método OnDrawGizmosSelected()
+    // Dibuja guías visuales en la ventana Scene de Unity para facilitar el ajuste del radio de suelo.
+    // Solo es visible para el desarrollador en el editor, no en el juego final.
     // =========================================================================================
     private void OnDrawGizmosSelected()
     {
+        // Dibuja un círculo verde en los pies del personaje si 'groundCheck' está asignado
         if (groundCheck != null)
         {
-            Gizmos.color = Color.green;                                         // Color verde para la guía
-            Gizmos.DrawWireSphere(groundCheck.position, groundRadius);           // Dibuja la esfera de detección
+            // Asigna el color verde a la guía
+            Gizmos.color = Color.green;
+
+            // Dibuja la circunferencia con el radio de detección configurado
+            Gizmos.DrawWireSphere(groundCheck.position, groundRadius);
         }
     }
 }
